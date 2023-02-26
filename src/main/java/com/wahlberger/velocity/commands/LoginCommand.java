@@ -1,0 +1,257 @@
+package com.wahlberger.velocity.commands;
+
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
+import java.text.BreakIterator;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.proxy.Player;
+import com.velocitypowered.api.proxy.ProxyServer;
+import com.wahlberger.velocity.database.ServerProtectionDatabase;
+import com.wahlberger.velocity.database.UserAuthenticationDatabase;
+import com.wahlberger.velocity.luckperms.AuthenticationContextCalculator;
+import com.wahlberger.velocity.model.AuthHelper;
+import com.wahlberger.velocity.model.AuthenticatedUsers;
+import com.wahlberger.velocity.model.Configuration;
+import com.wahlberger.velocity.model.LoginResultHandler;
+
+import org.slf4j.Logger;
+
+import net.kyori.adventure.text.Component;
+import net.luckperms.api.LuckPerms;
+import net.luckperms.api.LuckPermsProvider;
+import net.luckperms.api.context.ImmutableContextSet;
+
+public class LoginCommand implements SimpleCommand {
+    private final UserAuthenticationDatabase userDatabase;
+    private final Logger logger;
+    private final ProxyServer proxyServer;
+    private final LuckPerms luckPerms;
+    private final AuthHelper authHelper;
+
+    private static final String DiscordAuthMethod = "discord";
+    private static final String PasswordAuthMethod = "password";
+    public static final String LoginSelfPasswordPermission = "auth.login.password.self";
+    public static final String LoginOthersPasswordPermission = "auth.login.password.others";
+
+    private static final Map<String, LoginResultHandler> resultHandlerMap = new HashMap<>();
+
+    private final String[] AllAuthMethods = { DiscordAuthMethod, PasswordAuthMethod };
+
+    public LoginCommand(Logger logger, UserAuthenticationDatabase userDatabase,
+            ServerProtectionDatabase protectionDatabase, ProxyServer proxyServer, Configuration config) {
+        this.logger = logger;
+        this.userDatabase = userDatabase;
+        this.proxyServer = proxyServer;
+        this.authHelper = new AuthHelper(logger, userDatabase, protectionDatabase, config);
+        this.luckPerms = LuckPermsProvider.get();
+    }
+
+    @Override
+    public void execute(Invocation invocation) {
+        String name = "";
+        String method = DiscordAuthMethod;
+        String password = "";
+        Player player = null;
+        Player invokingPlayer = null;
+        boolean isOtherPlayer = invocation.arguments().length > 2;
+
+        if (invocation.source() instanceof Player) {
+            invokingPlayer = (Player)invocation.source();
+        } else {
+            return;
+        }
+
+        if (invocation.arguments().length < 3) {
+            if (invocation.source() instanceof Player) {
+                player = (Player) invocation.source();
+                name = player.getGameProfile().getName();
+            }
+        }
+        if (invocation.arguments().length >= 1) {
+            method = invocation.arguments()[0];
+            boolean isValidAuthMethod = false;
+
+            for (String authMethod : AllAuthMethods) {
+                if (authMethod.equals(method)) {
+                    isValidAuthMethod = true;
+                    break;
+                }
+            }
+
+            if (!isValidAuthMethod) {
+                invocation.source().sendMessage(Component.text(String.format(
+                        "The authentication method '%s' is not valid. Please try again with a valid authentication method.", method)));
+                return;
+            }
+
+            if (invocation.arguments().length > 2) {
+                if (method.equals(DiscordAuthMethod)) {
+                    invocation.source().sendMessage(Component.text(String.format(
+                            "The Discord authentication method does not take a user parameter. Cannot proceed with login.")));
+                    return;
+                }
+
+                name = invocation.arguments()[2];
+                Optional<Player> possiblePlayer = proxyServer.getPlayer(name);
+
+                if (!possiblePlayer.isPresent()) {
+                    logger.error(String.format("The player %s does not exist, cannot proceed with login.", name));
+                    return;
+                }
+
+                player = possiblePlayer.get();
+                password = invocation.arguments()[1];
+            }
+
+            if (invocation.arguments().length == 2) {
+                password = invocation.arguments()[1];
+            }
+        }
+        
+        if (AuthenticatedUsers.isAuthenticated(player.getGameProfile().getName())) {
+            if (isOtherPlayer) {
+                this.logger.info(String.format("The player %s tried to log in the player %s onto the server, but is already logged in.", invokingPlayer.getGameProfile().getName(), player.getGameProfile().getName()));
+                invocation.source().sendMessage(Component.text(String.format("The player %s is already logged into the server.", player.getGameProfile().getName())));
+            } else {
+                this.logger.info(String.format("The player %s tried to log into the server, but is already logged in.", player.getGameProfile().getName()));
+                invocation.source().sendMessage(Component.text(String.format("You are already logged into the server.")));
+            }
+            return;
+        }
+
+        String ipAddress = "";
+        InetAddress inetAddress = player.getRemoteAddress().getAddress();
+
+        if (inetAddress instanceof Inet4Address) {
+            ipAddress = ((Inet4Address)inetAddress).toString();
+        } else {
+            ipAddress = ((Inet6Address)inetAddress).toString();
+        }
+        
+        StringBuilder messageBuilder = new StringBuilder();
+
+        if (method.equals(DiscordAuthMethod)) {
+            if (!authHelper.isUserDatabaseAuthAvailable()) {
+                invocation.source().sendMessage(Component.text(
+                        "The user database is not available at this time. Please login using password protection instead."));
+            } else {
+                authHelper.authenticateDiscord(player, ipAddress, null);
+            }
+            return;
+        } else if (method.equals(PasswordAuthMethod)) {
+            authHelper.authenticatePassword(invokingPlayer, player.getGameProfile().getName(), null, password, true, isOtherPlayer);
+        }
+
+        if (isOtherPlayer) {
+            messageBuilder.append(String.format("The user %s ", name));
+        } else {
+            messageBuilder.append("You ");
+        }
+
+        if (!AuthenticatedUsers.isAuthenticated(name)) {
+            messageBuilder
+                    .append(" could not be logged in. Please try again and contact a moderator if the issue persists.");
+            invocation.source().sendMessage(Component.text(messageBuilder.toString()));
+            if (resultHandlerMap.containsKey(name)) {
+                resultHandlerMap.get(name).handle(name, false);
+            }
+        } else {
+            if (isOtherPlayer) {
+                messageBuilder.append("has");
+            } else {
+                messageBuilder.append("have");
+            }
+
+            messageBuilder.append(" been logged in to the server!");
+            invocation.source().sendMessage(Component.text(messageBuilder.toString()));
+
+            if (isOtherPlayer) {
+                player.sendMessage(Component.text(String.format("The player %s has logged you into the server. Enjoy your stay!", invokingPlayer.getGameProfile().getName())));
+            }
+
+            if (resultHandlerMap.containsKey(name)) {
+                resultHandlerMap.get(name).handle(name, true);
+            }
+        }
+    }
+
+    @Override
+    public List<String> suggest(Invocation invocation) {
+        List<String> suggestions = new ArrayList<>();
+
+        if (invocation.arguments().length == 1) {
+            String method = invocation.arguments()[0];
+            for (String authMethod : AllAuthMethods) {
+                if (authMethod.startsWith(method)) {
+                    suggestions.add(authMethod);
+                }
+            }
+        } else if (invocation.arguments().length == 3) {
+            String playerName = invocation.arguments()[2];
+            String method = invocation.arguments()[0];
+
+            if (method.equals(PasswordAuthMethod)) {
+                Collection<Player> allPlayers = proxyServer.getAllPlayers();
+                logger.info(String.format("Currently %s players connected", allPlayers.size()));
+
+                for (Player player : allPlayers) {
+                    ImmutableContextSet contextSet = luckPerms.getPlayerAdapter(Player.class).getContext(player);
+                    boolean isAuthAvailable = contextSet.containsKey(AuthenticationContextCalculator.KEY);
+
+                    logger.info(String.format("Does player %s have authentication context? %s", player.getGameProfile().getName(), isAuthAvailable));
+
+                    if (luckPerms.getPlayerAdapter(Player.class).getContext(player)
+                            .contains(AuthenticationContextCalculator.KEY, String.valueOf(false))
+                            && player.getGameProfile().getName().startsWith(playerName)) {
+                        suggestions.add(player.getGameProfile().getName());
+                    }
+                }
+            }
+        }
+
+        return suggestions;
+    }
+
+    @Override
+    public boolean hasPermission(Invocation invocation) {
+        String method = DiscordAuthMethod;
+        String playerName = "";
+
+        if (invocation.arguments().length >= 1) {
+            method = invocation.arguments()[0];
+        }
+
+        if (invocation.arguments().length == 3) {
+            playerName = invocation.arguments()[2];
+        }
+
+        if (method.strip().equals(PasswordAuthMethod)) {
+            if (playerName.strip().equals("")) {
+                return invocation.source().getPermissionValue(LoginSelfPasswordPermission).asBoolean();
+            } else {
+                return invocation.source().getPermissionValue(LoginOthersPasswordPermission).asBoolean();
+            }
+        }
+
+        return true;
+    }
+
+    public static void unregisterResultListener(String playerName) {
+        if (resultHandlerMap.containsKey(playerName)) {
+            resultHandlerMap.remove(playerName);
+        }
+    }
+
+    public static void registerResultListener(String playerName, LoginResultHandler handler) {
+        unregisterResultListener(playerName);
+        resultHandlerMap.put(playerName, handler);
+    }
+}

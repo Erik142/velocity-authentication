@@ -1,0 +1,20 @@
+{
+    "postgresConfiguration": {
+        "host": "10.0.0.251",
+        "database": "",
+        "port": 5433,
+        "username": "postgres",
+        "password": "1gXJL2rlDdHRAmBz0ljD"
+    },
+    "rabbitMqConfiguration": {
+        "host": "10.0.0.251",
+        "username": "rabbitmq",
+        "password": "rabbitmq",
+        "port": 5672,
+        "virtualHost": "/",
+        "publishExchangeName": "minecraft",
+        "consumeQueueName":"minecraft-auto-connect",
+        "routingKey": "*"
+    },
+    "serverPassword":"12345"
+}

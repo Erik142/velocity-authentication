@@ -1,0 +1,18 @@
+{
+    "postgresConfiguration": {
+        "host": "localhost",
+        "database": "",
+        "port": 5432,
+        "username": "postgres",
+        "password": "postgres"
+    },
+    "rabbitMqConfiguration": {
+        "host": "localhost",
+        "username": "rabbitmq",
+        "password": "rabbitmq",
+        "port": 5672,
+        "virtualHost": "/",
+        "exchangeName": "minecraft",
+        "routingKey": ""
+    }
+}

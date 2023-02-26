@@ -1,0 +1,1 @@
+{"id":"velocity-authentication","name":"Velocity authentication","version":"0.0.1","authors":["Erik Wahlberger"],"dependencies":[{"id":"luckperms","optional":false}],"main":"com.wahlberger.velocity.App"}

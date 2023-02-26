@@ -1,0 +1,10 @@
+com/wahlberger/velocity/model/LoginModel.class
+com/wahlberger/velocity/model/Configuration.class
+com/wahlberger/velocity/queue/MessageQueue.class
+com/wahlberger/velocity/model/AuthenticationRequest.class
+com/wahlberger/velocity/model/QueueModel.class
+com/wahlberger/velocity/queue/RabbitMqMessageQueue$1.class
+com/wahlberger/velocity/queue/RabbitMqMessageQueue.class
+com/wahlberger/velocity/model/RabbitMqConfiguration.class
+com/wahlberger/velocity/model/PostgresConfiguration.class
+com/wahlberger/velocity/model/ServerConnectModel.class

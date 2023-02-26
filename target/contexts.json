@@ -1,0 +1,6 @@
+{
+  "static-contexts": {},
+  "default-contexts": {
+    "authenticated": "true"
+  }
+}

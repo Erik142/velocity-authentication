@@ -1,0 +1,198 @@
+package com.wahlberger.velocity.database;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+
+import com.velocitypowered.api.proxy.ProxyServer;
+import com.wahlberger.velocity.database.postgres.Listener;
+import com.wahlberger.velocity.model.AuthenticationRequest;
+import com.wahlberger.velocity.model.PostgresConfiguration;
+
+import org.apache.commons.dbcp2.BasicDataSource;
+import org.slf4j.Logger;
+
+public class PostgresDatabase implements UserAuthenticationDatabase {
+    private final Logger logger;
+    private final BasicDataSource connectionPool;
+    private final Listener listener;
+
+    public PostgresDatabase(ProxyServer proxyServer, Logger logger, PostgresConfiguration config) throws SQLException, ClassNotFoundException {
+        this.logger = logger;
+        connectionPool = new BasicDataSource();
+        connectionPool.setUsername(config.getUsername());
+        connectionPool.setPassword(config.getPassword());
+        connectionPool.setDriverClassName("org.postgresql.Driver");
+        connectionPool.setUrl(getConnectionString(config));
+        connectionPool.setTestOnBorrow(true);
+        connectionPool.setTestOnCreate(true);
+        connectionPool.setTestOnReturn(true);
+        connectionPool.setTestWhileIdle(true);
+        connectionPool.setInitialSize(10);
+
+        listener = new Listener(connectionPool, this, proxyServer, logger);
+        listener.start();
+
+        /*
+        Class.forName("org.postgresql.Driver");
+        Properties props = new Properties();
+        props.setProperty("user", config.getUsername());
+        props.setProperty("password", config.getPassword());
+        this.conn = DriverManager.getConnection(getConnectionString(config), props);
+        */
+    }
+
+    private String getConnectionString(PostgresConfiguration config) {
+        String url = String.format("jdbc:postgresql://%s:%d/%s", config.getHost(), config.getPort(), config.getDatabase());
+
+        return url;
+    }
+
+    @Override
+    public boolean isPlayerValid(String playerName) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT COUNT(*) AS total FROM Players WHERE minecraftName=?")) {
+            statement.setString(1, playerName);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            return rs.getInt("total") > 0;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+            return false;
+        }
+    }
+
+    @Override
+    public boolean isPlayerAuthValid(String playerName, String ipAddress) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT COUNT(*) AS total FROM AuthenticatedPlayers INNER JOIN AuthenticationRequests ON(AuthenticatedPlayers.authRequestId=AuthenticationRequests.id) WHERE AuthenticatedPlayers.minecraftName=? AND AuthenticationRequests.ipAddress=?")) {
+            statement.setString(1, playerName);
+            statement.setString(2, ipAddress);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            return rs.getInt("total") > 0;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+            return false;
+        }
+    }
+
+    /*
+    @Override
+    public boolean isServerAuthRequired(String serverName) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT COUNT(*) as total FROM ProtectedServers WHERE name=?")) {
+            statement.setString(1, serverName);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            return rs.getInt("total") > 0;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+            return false;
+        }
+    }
+
+    @Override
+    public void deleteServerAuth(String serverName) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("DELETE FROM ProtectedServers WHERE name=?")) {
+            statement.setString(1, serverName);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            logger.error(e.toString());
+        }
+    }
+
+    @Override
+    public void addServerAuth(String serverName) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("INSERT INTO ProtectedServers VALUES (?)")) {
+            statement.setString(1, serverName);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            logger.error(e.toString());
+        }
+    }
+    */
+    @Override 
+    public int getAuthRequestId(int id) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT authRequestId FROM AuthenticatedPlayers WHERE id=?")) {
+            statement.setInt(1, id);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            int authRequestId = rs.getInt("authRequestId");
+            return authRequestId;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+        }
+
+        return -1;
+    }
+
+    @Override
+    public AuthenticationRequest getAuthRequest(int id) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT * FROM AuthenticationRequests WHERE id=?")) {
+            statement.setInt(1, id);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            String minecraftUser = rs.getString("minecraftName");
+            String minecraftServer = rs.getString("minecraftServer");
+            boolean isHandled = rs.getBoolean("handled");
+
+            AuthenticationRequest request = new AuthenticationRequest(id, minecraftUser, minecraftServer, isHandled);
+            return request;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+        }
+
+        return null;
+    }
+
+    @Override
+    public int addAuthRequest(String minecraftUser, String ipAddress, String minecraftServer) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("INSERT INTO AuthenticationRequests(minecraftName, minecraftServer, ipAddress) VALUES (?,?,?) RETURNING id")) {
+            statement.setString(1, minecraftUser);
+            statement.setString(2, minecraftServer);
+            statement.setString(3, ipAddress);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            int id = rs.getInt(1);
+            return id;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+        }
+
+        return -1;
+    }
+
+    @Override
+    public boolean isRegistrationCodeValid(String registrationCode) {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT COUNT(*) AS codes FROM Players WHERE registrationCode=?")) {
+            statement.setString(1, registrationCode);
+            ResultSet rs = statement.executeQuery();
+            rs.next();
+            return rs.getInt("codes") > 0;
+        } catch (SQLException e) {
+            logger.error(e.toString());
+        }
+
+        return false;
+    }
+
+    @Override
+    public void register(String minecraftUser, String registrationCode) {
+       try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("UPDATE Players SET minecraftName=? WHERE registrationCode=?")) {
+           statement.setString(1, minecraftUser);
+           statement.setString(2, registrationCode);
+           statement.executeUpdate();
+       } catch (SQLException e) {
+           logger.error(e.toString());
+       }
+    }
+
+    @Override
+    public boolean isDatabaseAvailable() {
+        try (Connection conn = connectionPool.getConnection(); PreparedStatement statement = conn.prepareStatement("SELECT 1 FROM Players")) {
+            statement.executeQuery();
+            return true;
+        } catch (SQLException e) {
+            return false;
+        }
+    }
+}
