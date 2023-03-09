@@ -67,7 +67,9 @@ public class ServerPostconnectEventHandler {
             player.sendMessage(Component.text(String.format("You are already authenticated!")));
             player.createConnectionRequest(server).fireAndForget();
         } else if (this.protectionDatabase.isServerAuthRequired(STANDARD_SERVER)) {
-
+            if (userDatabase.isPlayerValid(player.getUsername())) {
+                player.createConnectionRequest(server).fireAndForget();
+            }
         }
     }
 }
